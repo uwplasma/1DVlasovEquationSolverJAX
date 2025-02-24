@@ -53,9 +53,9 @@ charge_mass_ratio=jnp.zeros(2)  #Charge to mass ratios uin SI units
 charge_mass_ratio=charge_mass_ratio.at[0].set(-elementary_charge/electron_mass) 
 charge_mass_ratio=charge_mass_ratio.at[1].set(elementary_charge/proton_mass)
 
-plasma_frequency = jnp.sqrt(n0_e *1.e+20* elementary_charge**2)/jnp.sqrt(electron_mass)/jnp.sqrt(epsilon_0)
+plasma_frequency = jnp.sqrt(n0_e * elementary_charge**2)/jnp.sqrt(electron_mass)/jnp.sqrt(epsilon_0)
 
-t_c=norm_JIC/speed_of_light     #normalization of time in JAX in Cell, which here is applied to the source
+#t_c=norm_JIC/speed_of_light     #normalization of time in JAX in Cell, which here is applied to the source
 t0 = 0
 number_omegap_steps=8000                             #This part needs to be better tested against JAX-in-Cell 
 t_final = number_omegap_steps/plasma_frequency
@@ -203,7 +203,7 @@ ax.set_ylabel("v/c", rotation=0)
 
 def animate(i):
     im.set_data(sol.ys[0][i].transpose())
-    ax.set_title(f"$t\\omega_P$ = {sol.ts[i]*plasma_frequency*t_c:.2f}")
+    ax.set_title(f"$t\\omega_P$ = {sol.ts[i]*plasma_frequency:.2f}")
     #im.set_clim(0, 1)
 
 
@@ -220,7 +220,7 @@ ax.set_ylabel("v/c", rotation=0)
 
 def animate(i):
     im.set_data(sol.ys[1][i].transpose())
-    ax.set_title(f"$t\\omega_P$ = {sol.ts[i]*plasma_frequency*t_c:.2f}")
+    ax.set_title(f"$t\\omega_P$ = {sol.ts[i]*plasma_frequency:.2f}")
     #im.set_clim(0, 1)
 
 ani = animation.FuncAnimation(fig, animate, frames=len(sol.ts), interval=100)
