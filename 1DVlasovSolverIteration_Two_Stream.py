@@ -14,6 +14,7 @@ import diffrax
 from functools import partial
 import matplotlib.image as img
 from jaxopt import ScipyMinimize
+import pickle
 
 #Inputs/variables
 v_th_e = 0.7            # Thermal Velocity of electrons normalised to speed of light (to match JAX in cell)
@@ -226,7 +227,14 @@ print(f"Initial loss: {loss}")
 maxiter = 3
 optimizer = ScipyMinimize(method="l-bfgs-b", fun=loss_function, tol=1e-8, maxiter=maxiter, options={'disp': True})
 result = optimizer.run(f0)
+# Save the optimized f0 to a file
 optimized_f0 = result.params
+with open('optimized_f0.pkl', 'wb') as f:
+    pickle.dump(optimized_f0, f)
+
+# Load the optimized f0 from the file
+with open('optimized_f0.pkl', 'rb') as f:
+    optimized_f0 = pickle.load(f)
 
 # Plot the resulting bounded_fe and the rho_target side by side
 fig, axes = plt.subplots(2, 3, figsize=(10, 10))
