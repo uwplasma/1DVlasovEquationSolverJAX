@@ -11,16 +11,14 @@ import numpy as np
 from jax.scipy.integrate import trapezoid
 from scipy.constants import elementary_charge,electron_mass,epsilon_0,Boltzmann,speed_of_light, proton_mass
 import diffrax 
-from functools import partial
-import matplotlib.image as img
-from jaxopt import ScipyMinimize
-import pickle
+
+
 
 #Inputs/variables
-v_th_e = 0.7            # Thermal Velocity of electrons normalised to speed of light (to match JAX in cell)
+v_th_e = 1.0            # Thermal Velocity of electrons normalised to speed of light (to match JAX in cell)
 Ti_o_Te=0.01               #ratio of ion to electron temperatures
 L=2.0                      #Length of the box
-vD_e=5.0                   #Ratio of electron drift velocity to thermal electron velocity
+vD_e=3.0                   #Ratio of electron drift velocity to thermal electron velocity
 vD_i=0.0                   #Ratio of ion drift velocity to thermal ion velocity
 n0=4.0                     #Background  number density * L
 n0_e=n0
@@ -30,12 +28,13 @@ wavenumber_electrons = 8.#4         # Wavenumber of electrons
 wavenumber_ions = 1.         # Wavenumber of lectrons
 A_e=0.1          #Amplitude of the spatial pertubation 
 A_i=0.0              #Amplitude of the spatial pertubation 
-number_omegap_steps=1000                             #This part needs to be better tested against JAX-in-Cell 
+
 
 ####Grid parameters
 nt = 100            #number of snapshots for time tracing the solution
-Nv = 100            # Number of Velocity Points
+Nv =100            # Number of Velocity Points
 Nx = 98             # Number of Position Points            # Number Density
+number_omegap_steps=2500                             #This part needs to be better tested against JAX-in-Cell 
 
 v_th_i=v_th_e*jnp.sqrt(Ti_o_Te)*jnp.sqrt(electron_mass/proton_mass) #v_th_i normalized to c
 
@@ -66,16 +65,17 @@ t_final = number_omegap_steps/plasma_frequency
 X, V_i = jnp.meshgrid(x, v_i, indexing='ij')
 X, V_e = jnp.meshgrid(x, v_e, indexing='ij')
 
-rtol = 1e-5
-atol = 1e-5
-rtol_lin = 1e-4
-atol_lin = 1e-4
-tol_lin=1.e-7
+rtol = 1e-7
+atol = 1e-7
+rtol_lin = 1e-5
+atol_lin = 1e-5
+tol_lin=1.e-9
 
 
 #Construct initial distributions
 f0_e=  n0_e / jnp.sqrt(2.*jnp.pi *v_th_e**2)*(0.5 * jnp.exp(-(V_e-vD_e*v_th_e)**2 / (2.*v_th_e**2)) +0.5 * jnp.exp(-(V_e+vD_e*v_th_e)**2 / (2.*v_th_e**2))) * (1 + A_e * jnp.sin(wavenumber_electrons * 2 * jnp.pi * X / L))
 f0_i = n0_I / jnp.sqrt(2.*jnp.pi * v_th_i**2) *(0.5 * jnp.exp(-(V_i-vD_i*v_th_i)**2 / (2.*v_th_i**2)) +0.5 * jnp.exp(-(V_i+vD_i*v_th_i)**2 / (2.* v_th_i**2))) * (1 + A_i * jnp.sin(wavenumber_ions* 2 * jnp.pi * X / L))
+
 
 # Central Difference in x
 @jit
@@ -144,7 +144,6 @@ def electricField(phi,dx):
 
 
 # Vlasov Equation
-# @partial(jit, static_argnums=(0))
 def vector_field(t, f, args):
     f_e,f_i=f
     #Boundaries in real space
@@ -181,109 +180,55 @@ saveat = diffrax.SaveAt(ts=jnp.linspace(t0, t_final, nt))
 # Tolerances
 
 stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol)
-# stepsize_controller = diffrax.PIDController(pcoeff=0.3, icoeff=0.4, rtol=rtol, atol=atol)
+#stepsize_controller = diffrax.PIDController(pcoeff=0.3, icoeff=0.4, rtol=rtol, atol=atol)
 # Solver
-
 solver = diffrax.Tsit5()
-
-# Define the target density field from .png image
-rho_target = jnp.array(img.imread('target.png')[:,:,0],dtype=float)
-zeromean_rho_target = rho_target-jnp.mean(rho_target)
-bounded_rho_target = zeromean_rho_target/jnp.max(jnp.abs(zeromean_rho_target))
-# rho_target = 1.0 + 0.02*(rho_target-0.5)
-# normalize so average density is 1
-# rho_target /= jnp.mean(rho_target)
-
-@jit
-def bounded_fe_solution(f0):
-    sol = diffrax.diffeqsolve(
-        term,
-        solver,
-        t0,
-        t_final,
-        delta_t,
-        f0,
-        saveat=saveat,
-        stepsize_controller=stepsize_controller,
-        max_steps=10000,
-        args=(x, v_e,v_i ,delta_x, delta_v_e,delta_v_i),
-        # progress_meter=diffrax.TqdmProgressMeter(),
-    )
-    fe = jnp.array(sol.ys[0][-1].transpose())
-    zeromean_fe = fe-jnp.mean(fe)
-    bounded_fe = zeromean_fe/jnp.max(jnp.abs(zeromean_fe))
-    return bounded_fe
-
-@jit
-def loss_function(f0):
-    bounded_fe = bounded_fe_solution(f0)
-    return jnp.mean((bounded_fe - bounded_rho_target)**2)
+sol = diffrax.diffeqsolve(
+    term,
+    solver,
+    t0,
+    t_final,
+    delta_t,
+    f0,
+    saveat=saveat,
+    stepsize_controller=stepsize_controller,
+    max_steps=None,
+    args=(x, v_e,v_i ,delta_x, delta_v_e,delta_v_i),
+    progress_meter=diffrax.TqdmProgressMeter(),
+)
 
 
-# Calculate the loss
-loss = loss_function(f0)
-print(f"Initial loss: {loss}")
 
-maxiter = 3
-optimizer = ScipyMinimize(method="l-bfgs-b", fun=loss_function, tol=1e-8, maxiter=maxiter, options={'disp': True})
-result = optimizer.run(f0)
-optimized_f0 = result.params
 
-# Save to pickle and CSV files
-with open('optimized_f0.pkl', 'wb') as f: pickle.dump(optimized_f0, f)
-with open('initial_f0.pkl', 'wb') as f: pickle.dump(f0, f)
-np.savetxt('optimized_f0e.csv', optimized_f0[0], delimiter=',')
-np.savetxt('initial_f0e.csv'  , f0[0], delimiter=',')
-np.savetxt('optimized_f0i.csv', optimized_f0[1], delimiter=',')
-np.savetxt('initial_f0i.csv'  , f0[1], delimiter=',')
+# Animiation electrons
+fig, ax = plt.subplots(figsize=(5, 5))
+plt.title('Electrons')
+im = ax.imshow(sol.ys[0][0].transpose(), origin="lower", extent=(xMin, xMax, vMin_e, vMax_e), aspect='auto', cmap="inferno")
+ax.set_xlabel("x")
+ax.set_ylabel("v/c", rotation=0)
 
-# # Load the optimized f0 from the CSV files
-# optimized_f0e = np.loadtxt('optimized_f0e.csv', delimiter=',')
-# optimized_f0i = np.loadtxt('optimized_f0i.csv', delimiter=',')
-# optimized_f0 = (optimized_f0e, optimized_f0i)
-# # Load the optimized f0 from the pckle file
-# with open('optimized_f0.pkl', 'rb') as f: optimized_f0 = pickle.load(f)
+def animate(i):
+    im.set_data(sol.ys[0][i].transpose())
+    ax.set_title(f"$t\\omega_P$ = {sol.ts[i]*plasma_frequency:.2f}")
+    #im.set_clim(0, 1)
 
-# Plot the resulting bounded_fe and the rho_target side by side
-fig, axes = plt.subplots(2, 3, figsize=(10, 10))
 
-# Plot rho_target
-axes[0, 0].set_title('Target rho')
-im1 = axes[0, 0].imshow(bounded_rho_target)
-axes[0, 0].set_xlabel("x")
-axes[0, 0].set_ylabel("v/c", rotation=0)
-fig.colorbar(im1, ax=axes[0, 0])
+ani = animation.FuncAnimation(fig, animate, frames=len(sol.ts), interval=100)
 
-# Plot initial bounded_fe
-axes[0, 1].set_title('Initial f0')
-im2 = axes[0, 1].imshow(f0[0].transpose())
-axes[0, 1].set_xlabel("x")
-axes[0, 1].set_ylabel("v/c", rotation=0)
-# fig.colorbar(im2, ax=axes[0, 1])
-
-# Plot final bounded_fe after optimization
-axes[0, 2].set_title('Optimized initial f0')
-im3 = axes[0, 2].imshow(optimized_f0[0].transpose())
-axes[0, 2].set_xlabel("x")
-axes[0, 2].set_ylabel("v/c", rotation=0)
-# fig.colorbar(im3, ax=axes[0, 2])
-
-# Plot resulting bounded_fe from the simulation with initial f0
-axes[1, 1].set_title('Resulting fe from initial f0')
-im4 = axes[1, 1].imshow(bounded_fe_solution(f0))
-axes[1, 1].set_xlabel("x")
-axes[1, 1].set_ylabel("v/c", rotation=0)
-# fig.colorbar(im4, ax=axes[1, 1])
-
-# Plot resulting bounded_fe from the simulation with optimized f0
-axes[1, 2].set_title('Resulting fe from optimized initial f0')
-im5 = axes[1, 2].imshow(bounded_fe_solution(optimized_f0))
-axes[1, 2].set_xlabel("x")
-axes[1, 2].set_ylabel("v/c", rotation=0)
-# fig.colorbar(im5, ax=axes[1, 2])
-
-# Hide the empty subplot
-axes[1, 0].axis('off')
-
-plt.tight_layout()
 plt.show()
+
+# # Animiation ions
+# fig, ax = plt.subplots(figsize=(5, 5))
+# plt.title('Ions')
+# im = ax.imshow(sol.ys[1][0].transpose(), origin="lower", extent=(xMin, xMax, vMin_i, vMax_i), aspect='auto', cmap="inferno")
+# ax.set_xlabel("x")
+# ax.set_ylabel("v/c", rotation=0)
+
+# def animate(i):
+#     im.set_data(sol.ys[1][i].transpose())
+#     ax.set_title(f"$t\\omega_P$ = {sol.ts[i]*plasma_frequency:.2f}")
+#     #im.set_clim(0, 1)
+
+# ani = animation.FuncAnimation(fig, animate, frames=len(sol.ts), interval=100)
+
+# plt.show()
